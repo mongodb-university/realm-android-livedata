@@ -1,6 +1,7 @@
 package com.mongodb.realm.livedataquickstart.model
 
 import android.util.Log
+import androidx.lifecycle.LiveData
 import androidx.lifecycle.ViewModel
 import io.realm.Realm
 import io.realm.kotlin.where
@@ -10,9 +11,12 @@ import io.realm.mongodb.Credentials
 import io.realm.mongodb.User
 import io.realm.mongodb.sync.SyncConfiguration
 
+
 class CounterModel : ViewModel() {
-    private var realm: Realm
-    var counter: LiveRealmObject<Counter>
+    private var realm: Realm? = null
+    private val _counter: LiveRealmObject<Counter> = LiveRealmObject(null)
+    val counter: LiveData<Counter>
+        get() = _counter
 
     init {
         val appID = "YOUR APP ID HERE" // TODO: replace this with your App ID
@@ -24,45 +28,55 @@ class CounterModel : ViewModel() {
         )
 
         // 2. authenticate a user
-        app.login(Credentials.anonymous())
+        app.loginAsync(Credentials.anonymous()) {
+            if(it.isSuccess) {
+                Log.v("QUICKSTART", "Successfully logged in anonymously.")
 
-        // 3. connect to a realm with Realm Sync
-        val user: User? = app.currentUser()
-        val partitionValue = "example partition"
-        val config = SyncConfiguration.Builder(user!!, partitionValue)
-            // because this application only reads/writes small amounts of data, it's OK to read/write from the UI thread
-            .allowWritesOnUiThread(true)
-            .allowQueriesOnUiThread(true)
-            .build()
+                // 3. connect to a realm with Realm Sync
+                val user: User? = app.currentUser()
+                val partitionValue = "example partition"
+                val config = SyncConfiguration.Builder(user!!, partitionValue)
+                    // because this application only reads/writes small amounts of data, it's OK to read/write from the UI thread
+                    .allowWritesOnUiThread(true)
+                    .allowQueriesOnUiThread(true)
+                    .build()
 
-        // open the realm
-        realm = Realm.getInstance(config)
+                // open the realm
+                realm = Realm.getInstance(config)
 
-        // 4. Query the realm for a Counter, creating a new Counter if one doesn't already exist
-        // access all counters stored in this realm
-        val counterQuery = realm.where<Counter>()
-        val counters = counterQuery.findAll()
+                // 4. Query the realm for a Counter, creating a new Counter if one doesn't already exist
+                // access all counters stored in this realm
+                val counterQuery = realm!!.where<Counter>()
+                val counters = counterQuery.findAll()
 
-        // if we haven't created the one counter for this app before (as on first launch), create it now
-        if(counters.size == 0) {
-            realm.executeTransaction { transactionRealm ->
-                val counter = Counter()
-                transactionRealm.insert(counter)
+                // if we haven't created the one counter for this app before (as on first launch), create it now
+                if (counters.size == 0) {
+                    realm?.executeTransaction { transactionRealm ->
+                        val counter = Counter()
+                        transactionRealm.insert(counter)
+                    }
+                }
+
+                // 5. Instantiate a LiveRealmObject using the Counter and store it in a member variable
+                // the counters query is life, so we can just grab the 0th index to get a guaranteed counter
+                this._counter.postValue(counters[0]!!)
+            } else {
+                Log.e("QUICKSTART", "Failed to log in anonymously. Error: ${it.error.message}")
             }
         }
-
-        // 5. Instantiate a LiveRealmObject using the Counter and store it in a member variable
-        // the counters query is life, so we can just grab the 0th index to get a guaranteed counter
-        this.counter = LiveRealmObject(counters[0])
     }
 
     fun incrementCounter() {
-        realm.executeTransaction {
-            counter.value?.add()
+        realm?.executeTransaction {
+            counter.value?.let { counterValue ->
+                counterValue.add()
+                _counter.postValue(counterValue)
+                Log.v("QUICKSTART", "Incremented counter. New value: ${counterValue.value.get()}")
+            }
         }
     }
 
     override fun onCleared() {
-        realm.close()
+        realm?.close()
     }
 }
